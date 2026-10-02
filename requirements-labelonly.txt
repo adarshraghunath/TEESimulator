@@ -1,4 +1,0 @@
-PyMUST==0.1.9
-numpy
-scipy
-matplotlib

@@ -1,11 +1,12 @@
 """
-Label-only TEE-style B-mode simulation (no CT) using PyMUST/SIMUS (pip install pymust, LGPL-2.1).
+Label-only TEE-style B-mode simulation using PyMUST/SIMUS (pip install pymust, LGPL-2.1).
 
-Input : a 2D fan label map (H, W) int, e.g. sample_runs/labels/000001.npy (apex top-center,
-        90 deg fan, fan depth = 0.95 * H pixels spanning --depth_mm).
-Output: <out>.npy (float32 B-mode in [0, 1], same grid) and <out>.png (label | simulated image).
+Input : one or more 2D fan label maps (H, W), STACOM 11-class, apex top-center, 90 deg fan,
+        fan depth = 0.95 * H pixels spanning 90 mm (see examples/input).
+Output: per label, in --out_dir: <stem>.npy (float32 in [0, 1]), <stem>.png (simulated image),
+        <stem>_label.png (colored label) and <stem>_compare.png (label | simulated image).
 
-The per-class reflectivities below are hand-chosen, not derived from any CT.
+The per-class reflectivities below are hand-chosen.
 """
 
 import argparse
@@ -17,6 +18,7 @@ from scipy.ndimage import binary_dilation
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
 import pymust
 
 # Relative scatterer amplitude per STACOM class (0 = unlabelled tissue).
@@ -88,29 +90,40 @@ def simulate(label, depth_mm=90.0, density=6.0, n_tx=21, seed=0, fc=None):
     return img
 
 
+LABEL_COLORS = ["black", "peru", "orange", "royalblue", "gold", "cornflowerblue",
+                "brown", "cyan", "magenta", "yellow", "green"]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--label", type=Path, required=True)
-    ap.add_argument("--out", type=Path, required=True, help="output path without extension")
+    ap.add_argument("--labels", type=Path, nargs="+", required=True)
+    ap.add_argument("--out_dir", type=Path, required=True)
     ap.add_argument("--n_tx", type=int, default=21)
-    ap.add_argument("--density", type=float, default=6.0, help="scatterers per mm^2")
+    ap.add_argument("--density", type=float, default=4.0, help="scatterers per mm^2")
     ap.add_argument("--fc", type=float, default=None, help="override center frequency (Hz)")
     a = ap.parse_args()
 
-    label = np.load(a.label)
-    img = simulate(label, density=a.density, n_tx=a.n_tx, fc=a.fc)
-    a.out.parent.mkdir(parents=True, exist_ok=True)
-    np.save(a.out.with_suffix(".npy"), img)
+    a.out_dir.mkdir(parents=True, exist_ok=True)
+    cmap = ListedColormap(LABEL_COLORS)
+    for path in a.labels:
+        print(f"== {path.stem}", flush=True)
+        label = np.load(path)
+        img = simulate(label, density=a.density, n_tx=a.n_tx, fc=a.fc)
+        stem = a.out_dir / path.stem
+        np.save(f"{stem}.npy", img)
+        plt.imsave(f"{stem}.png", img, cmap="gray", vmin=0, vmax=1)
+        plt.imsave(f"{stem}_label.png", label, cmap=cmap, vmin=-0.5, vmax=10.5)
 
-    fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-    ax[0].imshow(label, cmap="tab20", interpolation="nearest")
-    ax[0].set_title("input label")
-    ax[1].imshow(img, cmap="gray", vmin=0, vmax=1)
-    ax[1].set_title("PyMUST SIMUS (label-only)")
-    for x in ax:
-        x.axis("off")
-    fig.tight_layout()
-    fig.savefig(a.out.with_suffix(".png"), dpi=110)
+        fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+        ax[0].imshow(label, cmap=cmap, vmin=-0.5, vmax=10.5, interpolation="nearest")
+        ax[0].set_title("input label")
+        ax[1].imshow(img, cmap="gray", vmin=0, vmax=1)
+        ax[1].set_title("PyMUST SIMUS (label-only)")
+        for x in ax:
+            x.axis("off")
+        fig.tight_layout()
+        fig.savefig(f"{stem}_compare.png", dpi=110)
+        plt.close(fig)
 
 
 if __name__ == "__main__":
